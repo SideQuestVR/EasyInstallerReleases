@@ -1,0 +1,57 @@
+name: SideQuest.EasyInstaller.Internal
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish-to-winget:
+    runs-on: windows-latest
+    steps:
+      - name: Install WinGet
+        uses: Cyberboss/install-winget@v1
+        with:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Install WinGetCreate
+        run: winget install wingetcreate --disable-interactivity --accept-source-agreements
+
+      - name: Get Latest Release
+        shell: pwsh
+        run: |
+          $packageId = 'SideQuestVR.SideQuestEasyInstaller'
+          $installerRegEx = 'SideQuest-Setup-.*-x64-win.exe$'
+
+          # Install needed modules
+          Install-Module Microsoft.WinGet.Client -Force
+
+          # Get the current WinGet version of the package
+          $winGetVersion = Find-WinGetPackage -Id $packageId | `
+              Select-Object -ExpandProperty version
+
+          # Get the latest release from the current repository
+          $release = Get-Content '${{github.event_path}}' | ConvertFrom-Json | Select-Object -ExpandProperty release
+          $latestVersion = $release.tag_name -replace 'v', ''
+
+          # WinGet version does not exist...
+          if (-not $winGetVersion) {
+            Write-Warning "Package Does Not Exist on WinGet...Exiting"
+            return
+          }
+
+          # Latest version and WinGet version are the same...
+          if ($latestVersion -eq $winGetVersion) {
+              Write-Warning "Latest Version ($latestVersion) == WinGet Version ($winGetVersion)...Exiting"
+              return
+          }
+
+          $downloadUrl = $release.assets | `
+            Where-Object -Property name -match $installerRegEx | `
+            Select -ExpandProperty browser_download_url
+
+          # Call WinGetCreate to update the version and URL of the package
+          & wingetcreate update $packageId `
+            --urls '$downloadUrl' '$downloadUrl' `
+            --version $latestVersion `
+            --submit `
+            --token '${{secrets.PublicAccessToken}}'
